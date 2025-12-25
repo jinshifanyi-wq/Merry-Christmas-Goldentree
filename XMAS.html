@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>2025 黄金涨势圣诞树 - Ashanti 音乐版</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&family=Luxurious+Script&display=swap" rel="stylesheet">
+    
+    <!-- MediaPipe Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #010102; font-family: 'Inter', sans-serif; touch-action: none; cursor: pointer; }
+        #canvas-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; pointer-events: none; }
+        .hud-text { font-family: 'Luxurious Script', cursive; text-shadow: 0 0 15px rgba(255, 215, 0, 0.6); }
+        .camera-preview {
+            position: absolute; top: 20px; right: 20px; width: 160px; height: 120px;
+            border-radius: 12px; overflow: hidden; border: 2px solid rgba(255, 255, 255, 0.1);
+            background: rgba(0, 0, 0, 0.5); transform: scaleX(-1);
+        }
+        #gesture-canvas { width: 100%; height: 100%; object-fit: cover; }
+        @keyframes pull { 0% { transform: translateY(0); } 50% { transform: translateY(10px); } 100% { transform: translateY(0); } }
+        .animate-pull { animation: pull 2s infinite ease-in-out; }
+        #loader {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: #010102; display: flex; justify-content: center; align-items: center;
+            z-index: 100; color: #FFD700; flex-direction: column; transition: opacity 1s;
+        }
+    </style>
+</head>
+<body onclick="playMusicOnce()">
+
+    <div id="loader">
+        <div class="text-4xl hud-text mb-4 text-[#FFD700]">Merry Christmas 2025...</div>
+        <div class="text-xs opacity-50 tracking-[0.2em] text-white uppercase">点击屏幕播放 Ashanti - We Wish You A Merry Christmas</div>
+    </div>
+
+    <!-- 背景音乐：Ashanti - We Wish You A Merry Christmas (预览源) -->
+    <!-- 增加多种备选音源保证兼容性 -->
+    <audio id="bgm" loop preload="auto" crossorigin="anonymous">
+        <source src="https://p.scdn.co/mp3-preview/a6f32e2c56f8f553a1f81d8995345a0b5f135b71?cid=774b75d1d0044af7893150c8c7ef300d" type="audio/mpeg">
+    </audio>
+
+    <div id="canvas-container"></div>
+
+    <div id="ui-layer" class="text-white p-8 flex flex-col justify-between">
+        <div class="flex flex-col items-start gap-4 mt-4">
+            <!-- 能量球开关 -->
+            <div id="power-indicator-container" class="flex flex-col items-center gap-2 pointer-events-auto cursor-pointer" onclick="togglePower(event)">
+                <div id="power-indicator" class="flex flex-col items-center gap-2 transition-all duration-500 animate-pull">
+                    <div class="w-[2px] bg-white/20 h-20 rounded-full"></div>
+                    <div id="bulb-icon" class="w-14 h-14 rounded-full border-2 border-white/30 flex items-center justify-center transition-all duration-500 bg-white/10 backdrop-blur-md">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                        </svg>
+                    </div>
+                </div>
+            </div>
+
+            <!-- UI 恢复至简洁版本 -->
+            <div class="mt-12 select-none">
+                <h1 class="text-6xl hud-text text-[#FFD700] mb-3 leading-none">Gold Rally 2025</h1>
+                <div class="flex gap-4 text-[11px] tracking-widest text-white/40 uppercase font-semibold">
+                    <span>Target <span class="text-green-400">$4,600</span></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 摄像头预览 -->
+        <div class="camera-preview pointer-events-auto shadow-2xl">
+            <canvas id="gesture-canvas"></canvas>
+            <video id="input_video" style="display:none"></video>
+        </div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'https://esm.sh/three@0.160.0';
+        import { EffectComposer } from 'https://esm.sh/three@0.160.0/examples/jsm/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'https://esm.sh/three@0.160.0/examples/jsm/postprocessing/RenderPass.js';
+        import { UnrealBloomPass } from 'https://esm.sh/three@0.160.0/examples/jsm/postprocessing/UnrealBloomPass.js';
+
+        const state = {
+            power: false,
+            powerAlpha: 0,
+            rotationVelocity: 0,
+            targetRotationVelocity: 0,
+            explodeFactor: 0,
+            isPulling: false,
+            pullStartY: 0,
+            lastToggleTime: 0,
+            musicStarted: false
+        };
+
+        // 核心播放逻辑
+        window.playMusicOnce = () => {
+            const audio = document.getElementById('bgm');
+            if (!state.musicStarted) {
+                audio.play().then(() => {
+                    state.musicStarted = true;
+                    console.log("Audio started playing");
+                }).catch(e => {
+                    console.warn("Audio play blocked by browser. Need direct click.", e);
+                });
+            }
+        };
+
+        // 点击开关逻辑
+        window.togglePower = (e) => {
+            e.stopPropagation(); // 防止触发 body 的点击
+            state.power = !state.power;
+            state.lastToggleTime = Date.now();
+            playMusicOnce();
+        };
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x010102);
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 12, 45);
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.toneMapping = THREE.ReinhardToneMapping;
+        document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+        const renderScene = new RenderPass(scene, camera);
+        const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.5, 0.4, 0.85);
+        bloomPass.threshold = 0.2;
+        const composer = new EffectComposer(renderer);
+        composer.addPass(renderScene);
+        composer.addPass(bloomPass);
+
+        // 1. 树体
+        const treeCount = 20000;
+        const treeGeo = new THREE.OctahedronGeometry(0.18, 0);
+        const treeMat = new THREE.MeshStandardMaterial({ transparent: true, opacity: 0.98, metalness: 0.1, roughness: 0.6, vertexColors: true });
+        const treeMesh = new THREE.InstancedMesh(treeGeo, treeMat, treeCount);
+        const treeOriginalPositions = [], treeRandomDirs = [], treeColors = new Float32Array(treeCount * 3);
+        const dummy = new THREE.Object3D();
+        const colorGreen = new THREE.Color(0x059669), colorRed = new THREE.Color(0xdc2626);
+
+        for (let i = 0; i < treeCount; i++) {
+            const y = (Math.random() * 20) - 8;
+            const radius = (12 - y) * 0.45 * Math.pow(Math.random(), 0.5);
+            const theta = Math.random() * Math.PI * 2;
+            const x = Math.cos(theta) * radius, z = Math.sin(theta) * radius;
+            dummy.position.set(x, y, z);
+            dummy.rotation.set(Math.random(), Math.random(), Math.random());
+            dummy.updateMatrix();
+            treeMesh.setMatrixAt(i, dummy.matrix);
+            treeOriginalPositions.push(new THREE.Vector3(x, y, z));
+            treeRandomDirs.push(new THREE.Vector3(x, y, z).normalize().multiplyScalar(22 + Math.random() * 15));
+            const c = Math.random() < 0.6 ? colorGreen : colorRed;
+            treeColors[i*3]=c.r; treeColors[i*3+1]=c.g; treeColors[i*3+2]=c.b;
+        }
+        treeGeo.setAttribute('color', new THREE.InstancedBufferAttribute(treeColors, 3));
+        scene.add(treeMesh);
+
+        // 2. 彩球
+        const lightCount = 450;
+        const lightGeo = new THREE.SphereGeometry(0.35, 12, 12);
+        const lightMat = new THREE.MeshStandardMaterial({ emissiveIntensity: 1.0, metalness: 0.8, roughness: 0.2, transparent: true, opacity: 0 });
+        const lightMesh = new THREE.InstancedMesh(lightGeo, lightMat, lightCount);
+        const lightColorsArr = [0xff0000, 0x00ff00, 0x0088ff, 0xff00ff, 0xffaa00, 0xffff00];
+
+        for (let i = 0; i < lightCount; i++) {
+            const y = (Math.random() * 20) - 8, radius = (12 - y) * 0.47, theta = Math.random() * Math.PI * 2;
+            dummy.position.set(Math.cos(theta) * radius, y, Math.sin(theta) * radius);
+            dummy.scale.setScalar(0.8 + Math.random() * 0.5);
+            dummy.updateMatrix();
+            lightMesh.setMatrixAt(i, dummy.matrix);
+            const c = new THREE.Color(lightColorsArr[Math.floor(Math.random() * lightColorsArr.length)]);
+            lightMesh.setColorAt(i, c);
+        }
+        scene.add(lightMesh);
+
+        // 3. 丝带
+        const ribbonCount = 5000;
+        const ribbonGeo = new THREE.BoxGeometry(0.25, 0.04, 0.4);
+        const ribbonMat = new THREE.MeshStandardMaterial({ color: 0xFFD700, metalness: 1.0, roughness: 0.1, transparent: true, opacity: 0, emissive: 0xFFD700, emissiveIntensity: 0.12 });
+        const ribbonMesh = new THREE.InstancedMesh(ribbonGeo, ribbonMat, ribbonCount);
+        for (let i = 0; i < ribbonCount; i++) {
+            const t = i / ribbonCount, angle = t * Math.PI * 18, y = -8 + t * 20, radius = (12 - y) * 0.49;
+            dummy.position.set(Math.cos(angle) * radius, y, Math.sin(angle) * radius);
+            dummy.rotation.set(t * 12, angle, 0);
+            dummy.updateMatrix();
+            ribbonMesh.setMatrixAt(i, dummy.matrix);
+        }
+        scene.add(ribbonMesh);
+
+        // 4. 里程碑 3D 标签
+        const milestones = [
+            { date: 'Dec 18', price: '$3,000', y: -4, angle: 0 },
+            { date: 'Apr 21', price: '$3,500', y: -0.5, angle: Math.PI * 0.5 },
+            { date: 'Dec 22', price: '$4,400', y: 3.5, angle: Math.PI },
+            { date: 'Dec 24', price: '$4,500', y: 7.5, angle: Math.PI * 1.5 }
+        ];
+
+        function createTextSprite(text, subtext) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 1024; canvas.height = 512;
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.textAlign = 'center';
+            ctx.fillStyle = '#FFD700';
+            ctx.shadowColor = '#FFD700';
+            ctx.shadowBlur = 25;
+            ctx.font = 'bold 170px Inter';
+            ctx.fillText(text, 512, 220);
+            ctx.font = 'bold 68px Inter';
+            ctx.fillStyle = '#FFFFFF';
+            ctx.shadowBlur = 10;
+            ctx.fillText(subtext, 512, 340);
+            const tex = new THREE.CanvasTexture(canvas);
+            const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0 });
+            const sprite = new THREE.Sprite(mat);
+            sprite.scale.set(18, 9, 1);
+            return sprite;
+        }
+
+        const milestoneSprites = milestones.map(m => {
+            const s = createTextSprite(m.price, m.date);
+            scene.add(s);
+            return s;
+        });
+
+        // 5. 雪花与地面
+        const snowCount = 8000;
+        const snowGeo = new THREE.BufferGeometry();
+        const snowPos = new Float32Array(snowCount * 3);
+        for (let i = 0; i < snowCount * 3; i++) snowPos[i] = (Math.random() - 0.5) * 120;
+        snowGeo.setAttribute('position', new THREE.BufferAttribute(snowPos, 3));
+        const snowMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.15, transparent: true, opacity: 0.2 });
+        const snowPoints = new THREE.Points(snowGeo, snowMat);
+        scene.add(snowPoints);
+
+        const groundPos = new Float32Array(60000 * 3);
+        for (let i = 0; i < 60000; i++) {
+            const r = Math.sqrt(Math.random()) * 60, th = Math.random() * Math.PI * 2;
+            groundPos[i*3]=Math.cos(th)*r; groundPos[i*3+1]=-9.5; groundPos[i*3+2]=Math.sin(th)*r;
+        }
+        const groundGeo = new THREE.BufferGeometry();
+        groundGeo.setAttribute('position', new THREE.BufferAttribute(groundPos, 3));
+        scene.add(new THREE.Points(groundGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 0.1, transparent: true, opacity: 0.3 })));
+
+        // 6. 顶端五角星
+        function createStarShape(ir, or, p) {
+            const s = new THREE.Shape();
+            for(let i=0; i<p*2; i++) {
+                const r = i%2===0?or:ir, a = i*(Math.PI*2/(p*2)) - Math.PI/2;
+                if(i===0) s.moveTo(Math.cos(a)*r, Math.sin(a)*r); else s.lineTo(Math.cos(a)*r, Math.sin(a)*r);
+            }
+            return s;
+        }
+        const starGeo = new THREE.ExtrudeGeometry(createStarShape(0.6, 1.5, 5), { depth: 0.4, bevelEnabled: true, bevelThickness: 0.1, bevelSize: 0.1 });
+        const starMat = new THREE.MeshStandardMaterial({ color: 0xFFD700, metalness: 1.0, roughness: 0.1, transparent: true, opacity: 0, emissive: 0xFFD700, emissiveIntensity: 0.3 });
+        const star = new THREE.Mesh(starGeo, starMat);
+        star.position.y = 12.5;
+        scene.add(star);
+
+        // 7. 粒子文字
+        const textPoints = [];
+        function sampleText(text, size, yOff) {
+            const canv = document.createElement('canvas'); canv.width = 400; canv.height = 100;
+            const ct = canv.getContext('2d');
+            ct.font = `bold ${size}px Inter`; ct.fillStyle = 'white';
+            ct.textAlign = 'center'; ct.fillText(text, 200, 70);
+            const data = ct.getImageData(0,0,400,100).data;
+            for(let y=0; y<100; y+=2) for(let x=0; x<400; x+=2) {
+                if(data[(y*400+x)*4+3] > 128) {
+                    textPoints.push({
+                        target: new THREE.Vector3((x-200)*0.065, (50-y)*0.065 + yOff, 0),
+                        origin: new THREE.Vector3((Math.random()-0.5)*15, (Math.random()-0.5)*15 + 15, (Math.random()-0.5)*15)
+                    });
+                }
+            }
+        }
+        sampleText("$4600", 60, 17.0);
+        sampleText("When?", 40, 15.0);
+
+        const pTextGeo = new THREE.BufferGeometry();
+        const pTextPos = new Float32Array(textPoints.length * 3);
+        pTextGeo.setAttribute('position', new THREE.BufferAttribute(pTextPos, 3));
+        const pTextMat = new THREE.PointsMaterial({ color: 0xFFD700, size: 0.18, transparent: true, opacity: 0, blending: THREE.AdditiveBlending });
+        const pTextMesh = new THREE.Points(pTextGeo, pTextMat);
+        scene.add(pTextMesh);
+
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.05);
+        scene.add(ambientLight);
+        const centerLight = new THREE.PointLight(0xffffff, 0, 60);
+        centerLight.position.set(0, 5, 0);
+        scene.add(centerLight);
+
+        // 手势追踪
+        const videoElement = document.getElementById('input_video');
+        const gestureCanvas = document.getElementById('gesture-canvas');
+        const gestureCtx = gestureCanvas.getContext('2d');
+
+        function onResults(results) {
+            gestureCtx.save(); gestureCtx.clearRect(0,0,320,240);
+            gestureCtx.drawImage(results.image, 0,0,320,240);
+            if (results.multiHandLandmarks && results.multiHandLandmarks[0]) {
+                const lm = results.multiHandLandmarks[0];
+                const isFist = lm[8].y > lm[6].y && lm[12].y > lm[10].y;
+                if (isFist) {
+                    if(!state.isPulling) { state.isPulling = true; state.pullStartY = lm[0].y; }
+                    else if(lm[0].y - state.pullStartY > 0.12 && (Date.now() - state.lastToggleTime > 1000)) { 
+                        state.power = !state.power; 
+                        state.lastToggleTime = Date.now();
+                        // 手势触发时尝试开启音乐
+                        playMusicOnce();
+                    }
+                } else state.isPulling = false;
+                const isOpen = lm[8].y < lm[6].y && lm[20].y < lm[18].y;
+                state.explodeFactor = THREE.MathUtils.lerp(state.explodeFactor, isOpen?1:0, 0.1);
+                state.targetRotationVelocity = (lm[8].x - 0.5) * 0.18;
+            }
+            gestureCtx.restore();
+        }
+
+        const hands = new Hands({locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
+        hands.setOptions({maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5});
+        hands.onResults(onResults);
+        new Camera(videoElement, {onFrame: async()=>await hands.send({image:videoElement}), width:320, height:240}).start().then(()=>document.getElementById('loader').style.display='none');
+
+        const clock = new THREE.Clock();
+        function animate() {
+            requestAnimationFrame(animate);
+            const time = clock.getElapsedTime();
+            state.powerAlpha = THREE.MathUtils.lerp(state.powerAlpha, state.power?1:0, 0.05);
+            state.rotationVelocity = THREE.MathUtils.lerp(state.rotationVelocity, state.targetRotationVelocity, 0.08);
+
+            const rot = (state.powerAlpha * 0.005) + state.rotationVelocity;
+            treeMesh.rotation.y += rot; lightMesh.rotation.y += rot; ribbonMesh.rotation.y += rot; 
+            star.rotation.y += 0.02; pTextMesh.rotation.y += rot;
+
+            for(let i=0; i<treeCount; i++){
+                dummy.position.copy(treeOriginalPositions[i].clone().lerp(treeRandomDirs[i], state.explodeFactor));
+                dummy.updateMatrix(); treeMesh.setMatrixAt(i, dummy.matrix);
+            }
+            treeMesh.instanceMatrix.needsUpdate = true;
+            treeMat.opacity = 0.2 + state.powerAlpha * 0.8;
+            treeMat.color.setScalar(0.5 + state.powerAlpha * 0.5);
+
+            milestoneSprites.forEach((s, idx) => {
+                s.material.opacity = state.powerAlpha;
+                const m = milestones[idx];
+                const r = (12 - m.y) * 0.48 + 5.5 + state.explodeFactor * 16;
+                const curAngle = m.angle + treeMesh.rotation.y;
+                s.position.set(Math.cos(curAngle) * r, m.y + Math.sin(time*2 + idx)*0.2, Math.sin(curAngle) * r);
+                s.scale.setScalar(2.2 + Math.sin(time*1.5 + idx)*0.2); 
+            });
+
+            ribbonMat.opacity = state.powerAlpha;
+            ribbonMat.emissiveIntensity = 0.05 + state.powerAlpha * 0.25; 
+            lightMat.opacity = state.powerAlpha;
+            lightMat.emissiveIntensity = state.powerAlpha * (1.5 + Math.sin(time*3)*1.0);
+
+            const pPos = pTextMesh.geometry.attributes.position.array;
+            pTextMat.opacity = state.powerAlpha;
+            for(let i=0; i<textPoints.length; i++){
+                const pt = textPoints[i];
+                const dest = pt.target.clone().lerp(pt.target.clone().multiplyScalar(2.0), state.explodeFactor);
+                const cur = pt.origin.clone().lerp(dest, state.powerAlpha);
+                pPos[i*3]=cur.x; pPos[i*3+1]=cur.y; pPos[i*3+2]=cur.z;
+            }
+            pTextGeo.attributes.position.needsUpdate = true;
+
+            ambientLight.intensity = 0.05 + state.powerAlpha * 1.5;
+            centerLight.intensity = state.powerAlpha * 4.0;
+            starMat.opacity = state.powerAlpha;
+            
+            const sAttr = snowPoints.geometry.attributes.position;
+            for(let i=0; i<snowCount; i++){
+                sAttr.array[i*3+1] -= 0.12; if(sAttr.array[i*3+1]<-60) sAttr.array[i*3+1]=60;
+            }
+            sAttr.needsUpdate = true;
+
+            composer.render();
+        }
+        animate();
+        window.addEventListener('resize', ()=>{
+            camera.aspect=window.innerWidth/window.innerHeight; camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight); composer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
